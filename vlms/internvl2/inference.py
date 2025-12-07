@@ -1,5 +1,6 @@
-import os
 import sys
+from pathlib import Path
+from typing import Union
 
 import numpy as np
 import torch
@@ -75,8 +76,11 @@ def dynamic_preprocess(image, min_num=1, max_num=12, image_size=448, use_thumbna
         processed_images.append(thumbnail_img)
     return processed_images
 
-def load_image(image_file, input_size=448, max_num=12):
-    image = Image.open(image_file).convert('RGB')
+def load_image(image_source: Union[str, Image.Image], input_size=448, max_num=12):
+    if isinstance(image_source, Image.Image):
+        image = image_source.convert('RGB')
+    else:
+        image = Image.open(image_source).convert('RGB')
     transform = build_transform(input_size=input_size)
     images = dynamic_preprocess(image, image_size=input_size, use_thumbnail=True, max_num=max_num)
     pixel_values = [transform(image) for image in images]
@@ -118,7 +122,7 @@ def load_video(video_path, bound=None, input_size=448, max_num=1, num_segments=3
 
 def load_internvl_model(model_path='OpenGVLab/InternVL2-8B'):
     """Load InternVL2 model/tokenizer once per process."""
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     model = AutoModel.from_pretrained(
         model_path,
         torch_dtype=torch.bfloat16,
@@ -129,8 +133,8 @@ def load_internvl_model(model_path='OpenGVLab/InternVL2-8B'):
     return model, tokenizer, device
 
 
-def generate_response(image_path, query, model, tokenizer, generation_config):
-    pixel_values = load_image(image_path, max_num=12)
+def generate_response(image: Image.Image, query, model, tokenizer, generation_config):
+    pixel_values = load_image(image, max_num=12)
     param = next(model.parameters())
     device = param.device
     dtype = param.dtype
@@ -139,27 +143,56 @@ def generate_response(image_path, query, model, tokenizer, generation_config):
     return response
 
 
+def extract_frame_from_video(video_path: Path, frame_number: int) -> Image.Image:
+    """Return the requested frame as a PIL image without saving to disk."""
+
+    try:
+        vr = VideoReader(str(video_path), ctx=cpu(0), num_threads=1)
+    except Exception as exc:
+        raise RuntimeError(f'Failed to open video: {video_path}') from exc
+
+    total_frames = len(vr)
+    if frame_number < 0 or frame_number >= total_frames:
+        raise ValueError(
+            f'Frame number {frame_number} is out of range. Total frames: {total_frames}'
+        )
+
+    frame = vr[frame_number]
+    return Image.fromarray(frame.asnumpy()).convert('RGB')
+
+
 def main():
-    if len(sys.argv) < 3:
-        print('Usage: python inference.py <image_path> <query>', file=sys.stderr)
+    if len(sys.argv) < 4:
+        print('Usage: python inference.py <video_path> <query> <frame_number>', file=sys.stderr)
         sys.exit(1)
 
-    image_path = sys.argv[1]
-    query = ' '.join(sys.argv[2:]).strip()
-
-    if not os.path.exists(image_path):
-        print(f'Image not found: {image_path}', file=sys.stderr)
+    video_path = Path(sys.argv[1]).expanduser()
+    if not video_path.exists():
+        print(f'Video not found: {video_path}', file=sys.stderr)
         sys.exit(1)
 
+    try:
+        frame_number = int(sys.argv[-1])
+    except ValueError:
+        print('Frame number must be an integer.', file=sys.stderr)
+        sys.exit(1)
+
+    query = ' '.join(sys.argv[2:-1]).strip()
     if not query:
         print('Query must not be empty.', file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        image = extract_frame_from_video(video_path, frame_number)
+    except (RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
         sys.exit(1)
 
     model, tokenizer, _ = load_internvl_model()
     generation_config = dict(max_new_tokens=1024, do_sample=True)
 
     try:
-        response = generate_response(image_path, query, model, tokenizer, generation_config)
+        response = generate_response(image, query, model, tokenizer, generation_config)
     except Exception as exc:
         print(f'Inference failed: {exc}', file=sys.stderr)
         sys.exit(1)

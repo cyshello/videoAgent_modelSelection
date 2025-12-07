@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Simple helper script to run Qwen2-VL inference on images.jpeg with a default query.
-python3 inference.py images.jpeg "Describe this image." 
+python3 inference.py /home/intern/youngseo/modelSelection/NExTQA/NExTQA/NExTVideo/2400084970.mp4 "Describe this image." 0

@@ -9,4 +9,4 @@ if [[ ! -x "$VENV_PYTHON" ]]; then
 	exit 1
 fi
 
-"$VENV_PYTHON" "$SCRIPT_DIR/inference.py" "$SCRIPT_DIR/images.jpeg" "Describe this image in one detailed caption."
+"$VENV_PYTHON" "$SCRIPT_DIR/inference.py" /home/intern/youngseo/modelSelection/NExTQA/NExTQA/NExTVideo/2400084970.mp4 "Describe this image." 0
